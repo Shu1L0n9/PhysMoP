@@ -14,6 +14,14 @@ from utils.utils import remove_singlular_batch, smoothness_constraint
 import config
 import constants
 
+# Import FNO modules if in FNO mode
+try:
+    from models.fno_operator import FNOOperator
+    from models.physics_regularizer import PhysicsRegularizer
+    FNO_AVAILABLE = True
+except ImportError:
+    FNO_AVAILABLE = False
+
 class Fusion(nn.Module):
     def __init__(self):
         super(Fusion, self).__init__()
@@ -209,7 +217,8 @@ class PhysMoP(nn.Module):
             hist_length,
             physics=True, 
             data=True,
-            fusion=False
+            fusion=False,
+            use_fno=None  # Auto-detect from config if None
     ):
 
         super(PhysMoP, self).__init__()
@@ -217,14 +226,100 @@ class PhysMoP(nn.Module):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.hist_length = hist_length
         self.fusion=fusion
+        
+        # Determine if using FNO operator mode
+        if use_fno is None:
+            use_fno = (config.model_kind == 'fno_operator')
+        self.use_fno = use_fno
+        
+        if self.use_fno:
+            # FNO Operator mode
+            if not FNO_AVAILABLE:
+                raise ImportError("FNO modules not available. Check fno_operator.py and physics_regularizer.py")
+            
+            self.fno_operator = FNOOperator(
+                input_dim=config.dim,
+                hidden_dim=config.fno_config.d_model,
+                num_layers=config.fno_config.num_layers,
+                modes=config.fno_config.modes,
+                hist_length=hist_length,
+                time_embed=config.fno_config.time_embed,
+                time_embed_dim=config.fno_config.time_embed_dim,
+                use_real_fft=config.fno_config.use_real_fft,
+                normalize=config.fno_config.normalize
+            )
+            
+            if physics:
+                self.physics_regularizer = PhysicsRegularizer(
+                    dim=config.dim,
+                    use_cholesky=config.physics_config.use_cholesky,
+                    epsilon=config.physics_config.epsilon,
+                    approx_derivatives=config.physics_config.approx_derivatives
+                )
+            else:
+                self.physics_regularizer = None
+        else:
+            # Original rollout mode
+            self.regressor = Regression(physics, data)
+            self.physics_regularizer = None
 
-        self.regressor = Regression(physics, data)
-
-    def forward_dynamics(self, gt_mesh, gt_q, gt_q_ddot, gt_M_inv, gt_JcT, device, mode='train'):
+    def forward_dynamics(self, gt_mesh, gt_q, gt_q_ddot, gt_M_inv, gt_JcT, device, mode='train', query_times=None):
         # gt_mesh: NxTx6890x3
         # gt_q: NxTx63
         gt_q = gt_q.reshape([-1, config.total_length, 63])
-        motion_pred_data, motion_pred_physics_gt, motion_pred_physics_pred, motion_pred_fusion, pred_q_ddot_physics_gt, weight_t = self.regressor(gt_q[:, :self.hist_length], gt_q, mode, self.fusion)
-        _, pred_q_ddot_data, _ = smoothness_constraint(motion_pred_data.clone(), constants.dt)
+        
+        if self.use_fno:
+            # FNO operator mode: one-shot prediction at query times
+            return self.forward_fno(gt_q, query_times, mode)
+        else:
+            # Original rollout mode
+            motion_pred_data, motion_pred_physics_gt, motion_pred_physics_pred, motion_pred_fusion, pred_q_ddot_physics_gt, weight_t = self.regressor(gt_q[:, :self.hist_length], gt_q, mode, self.fusion)
+            _, pred_q_ddot_data, _ = smoothness_constraint(motion_pred_data.clone(), constants.dt)
 
-        return (motion_pred_data, motion_pred_physics_gt, motion_pred_physics_pred, motion_pred_fusion, pred_q_ddot_data, pred_q_ddot_physics_gt, weight_t)
+            return (motion_pred_data, motion_pred_physics_gt, motion_pred_physics_pred, motion_pred_fusion, pred_q_ddot_data, pred_q_ddot_physics_gt, weight_t)
+    
+    def forward_fno(self, gt_q, query_times, mode='train'):
+        """
+        FNO operator forward pass.
+        
+        Args:
+            gt_q: (batch, total_length, 63) - full sequence
+            query_times: (batch, K) - query time points (frame indices)
+            mode: 'train' or 'test'
+        
+        Returns:
+            Similar structure to original but with FNO predictions
+        """
+        batch_size = gt_q.shape[0]
+        
+        # Extract history
+        hist = gt_q[:, :self.hist_length, :]  # (B, H, 63)
+        
+        # Default query times if not provided
+        if query_times is None:
+            query_times = torch.arange(
+                self.hist_length, config.total_length, 
+                dtype=torch.float32, device=gt_q.device
+            ).unsqueeze(0).expand(batch_size, -1)
+        
+        # FNO operator: one-shot prediction
+        q_pred_future = self.fno_operator(hist, query_times)  # (B, K, 63)
+        
+        # Concatenate history with predictions to match original output format
+        motion_pred_data = torch.cat([hist, q_pred_future], dim=1)  # (B, T, 63)
+        
+        # For compatibility, create placeholders for physics predictions
+        # In FNO mode, physics is a regularizer, not a separate prediction branch
+        motion_pred_physics_gt = torch.zeros_like(motion_pred_data)
+        motion_pred_physics_pred = motion_pred_data.clone()
+        motion_pred_fusion = motion_pred_data.clone()
+        
+        # Compute smoothness metrics
+        _, pred_q_ddot_data, _ = smoothness_constraint(motion_pred_data.clone(), constants.dt)
+        pred_q_ddot_physics_gt = torch.zeros([batch_size, config.total_length-2, config.dim]).float().to(gt_q.device)
+        
+        # No fusion weights in FNO mode
+        weight_t = torch.zeros(1).to(gt_q.device)
+        
+        return (motion_pred_data, motion_pred_physics_gt, motion_pred_physics_pred, 
+                motion_pred_fusion, pred_q_ddot_data, pred_q_ddot_physics_gt, weight_t)

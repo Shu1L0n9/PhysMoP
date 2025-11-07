@@ -29,6 +29,9 @@ class BaseDataset_test(Dataset):
         Y['q']  = anno[(config.hist_length-self.hist_length):, :63]
         Y['shape']  = anno[(config.hist_length-self.hist_length):, 63:63+10]
         Y['gender_id']  = anno[(config.hist_length-self.hist_length):, 63+10]
+        
+        # Add query times for FNO operator mode
+        Y['query_times'] = np.arange(self.hist_length, config.total_length, dtype=np.float32)
 
         return Y
 

@@ -1,0 +1,56 @@
+# FNO Operator Configuration
+# This config enables the Fourier Neural Operator (FNO) mode for PhysMoP
+
+# Model type: 'rollout' (original) or 'fno_operator' (new FNO-based)
+model:
+  kind: fno_operator  # Switch to enable FNO operator mode
+  
+# FNO-specific parameters
+fno:
+  # History and query settings
+  hist_length: 25          # History window length (frames)
+  query_length: 25         # Number of future query time points
+  
+  # Architecture parameters
+  d_model: 128             # Hidden dimension for FNO layers
+  num_layers: 4            # Number of FNO spectral convolution layers
+  modes: 16                # Number of Fourier modes to keep (frequency cutoff)
+  
+  # Spectral processing
+  padding_mode: reflect    # Padding for FFT: 'reflect' or 'circular'
+  dealias: true            # Apply dealiasing/spectral cutoff
+  
+  # Time encoding
+  time_embed: fourier      # Time positional encoding: 'fourier', 'learned', or 'none'
+  time_embed_dim: 4        # Dimension for time embedding [sin, cos, t, t^2]
+  
+  # Normalization
+  normalize_input: true    # Normalize input poses
+  normalize_output: true   # Normalize output poses
+  
+  # FFT optimization
+  use_real_fft: true       # Use real FFT for efficiency
+  
+# Physics regularizer parameters
+physics:
+  enabled: true            # Enable physics consistency regularizer
+  use_cholesky: true       # Use Cholesky decomposition for M (ensure positive definite)
+  epsilon: 1e-6            # Small value added to diagonal for numerical stability
+  approx_derivatives: false # Use stop-grad approximation for early training stability
+  
+# Loss weights
+loss:
+  lambda_data: 1.0         # Weight for data loss (MPJPE/keypoint loss)
+  lambda_physics: 0.1      # Weight for physics residual loss
+  lambda_smooth: 0.01      # Weight for smoothness (acceleration/TV) loss
+  
+  # Physics loss warmup schedule
+  physics_warmup_epochs: 2  # Number of epochs to warmup physics loss from 0
+  
+# Training settings for FNO
+training:
+  query_sampling: uniform   # 'uniform' for equidistant, 'random' for irregular sampling
+  test_query_sampling: uniform  # Query sampling strategy for testing
+  
+# Backwards compatibility
+backwards_compatible: true  # Allow loading checkpoints from rollout mode

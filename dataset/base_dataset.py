@@ -28,6 +28,23 @@ class BaseDataset(Dataset):
         Y['q']  = anno[(config.hist_length-self.hist_length):, :63]
         Y['shape']  = anno[(config.hist_length-self.hist_length):, 63:63+10]
         Y['gender_id']  = anno[(config.hist_length-self.hist_length):, 63+10]
+        
+        # Add query times for FNO operator mode
+        # Generate future query time points (in frame indices)
+        if config.model_kind == 'fno_operator':
+            if config.query_sampling == 'uniform':
+                # Uniform sampling: equally spaced future frames
+                Y['query_times'] = np.arange(self.hist_length, config.total_length, dtype=np.float32)
+            else:  # 'random'
+                # Random non-uniform sampling (for generalization testing)
+                query_times = np.sort(np.random.uniform(
+                    self.hist_length, config.total_length, 
+                    size=config.pred_length
+                ))
+                Y['query_times'] = query_times.astype(np.float32)
+        else:
+            # For rollout mode, still provide placeholder
+            Y['query_times'] = np.arange(self.hist_length, config.total_length, dtype=np.float32)
 
         return Y
 
