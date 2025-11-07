@@ -308,11 +308,12 @@ class PhysMoP(nn.Module):
         # Concatenate history with predictions to match original output format
         motion_pred_data = torch.cat([hist, q_pred_future], dim=1)  # (B, T, 63)
         
-        # For compatibility, create placeholders for physics predictions
+        # For compatibility with original interface, create placeholders for unused branches
         # In FNO mode, physics is a regularizer, not a separate prediction branch
-        motion_pred_physics_gt = torch.zeros_like(motion_pred_data)
-        motion_pred_physics_pred = motion_pred_data.clone()
-        motion_pred_fusion = motion_pred_data.clone()
+        # These are kept for interface compatibility with evaluation/visualization code
+        motion_pred_physics_gt = torch.zeros_like(motion_pred_data)  # Not used in FNO mode
+        motion_pred_physics_pred = motion_pred_data.clone()  # Main prediction
+        motion_pred_fusion = motion_pred_data.clone()  # No fusion in FNO mode
         
         # Compute smoothness metrics
         _, pred_q_ddot_data, _ = smoothness_constraint(motion_pred_data.clone(), constants.dt)

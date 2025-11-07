@@ -217,22 +217,26 @@ class PhysicsRegularizer(nn.Module):
         motion_feats_flat = motion_feats_expanded.reshape(-1, motion_feats_all.shape[-1])
         
         # Concatenate current state to create full feature vector
-        # Expected feature_dim = dim * 4 (from original implementation)
-        # We have: motion_feats (varies), q, q_dot, q_ddot (each dim)
-        # Pad motion_feats_flat or concatenate with state
-        if motion_feats_flat.shape[-1] < self.dim * 4:
-            # Concatenate with current state info to reach expected feature_dim
-            features = torch.cat([motion_feats_flat, q_flat, q_dot_flat, q_ddot_flat], dim=-1)
-            # If still not enough, pad or use first dim*4 dimensions
-            if features.shape[-1] > self.dim * 4:
-                features = features[:, :self.dim * 4]
-            elif features.shape[-1] < self.dim * 4:
-                # Pad with zeros
-                padding = torch.zeros(features.shape[0], self.dim * 4 - features.shape[-1], 
-                                     device=features.device, dtype=features.dtype)
-                features = torch.cat([features, padding], dim=-1)
-        else:
-            features = motion_feats_flat[:, :self.dim * 4]
+        # Expected feature_dim = dim * 4 (from original PhysMoP implementation)
+        # We concatenate: [motion_feats, q, q_dot, q_ddot] to reach the expected dimension
+        expected_feature_dim = self.dim * 4
+        
+        # Validate and construct feature vector
+        features = torch.cat([motion_feats_flat, q_flat, q_dot_flat, q_ddot_flat], dim=-1)
+        
+        if features.shape[-1] > expected_feature_dim:
+            # Truncate if too large
+            features = features[:, :expected_feature_dim]
+        elif features.shape[-1] < expected_feature_dim:
+            # Pad with zeros if too small
+            padding_size = expected_feature_dim - features.shape[-1]
+            padding = torch.zeros(features.shape[0], padding_size, 
+                                 device=features.device, dtype=features.dtype)
+            features = torch.cat([features, padding], dim=-1)
+        
+        # Sanity check
+        assert features.shape[-1] == expected_feature_dim, \
+            f"Feature dimension mismatch: expected {expected_feature_dim}, got {features.shape[-1]}"
         
         # Estimate physics terms
         M_inv = self.estimate_M_inv(features).reshape(batch_size * K, dim, dim)

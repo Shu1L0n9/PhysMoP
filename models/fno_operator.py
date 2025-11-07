@@ -103,15 +103,6 @@ class SpectralConv1d(nn.Module):
             out = torch.fft.ifft(out_ft_complex, dim=-1, norm='ortho').real
         
         return out
-        out_ft_complex = torch.complex(out_ft[..., 0], out_ft[..., 1])
-        
-        # Apply inverse FFT
-        if self.use_real_fft:
-            out = torch.fft.irfft(out_ft_complex, n=time_steps, dim=-1, norm='ortho')
-        else:
-            out = torch.fft.ifft(out_ft_complex, dim=-1, norm='ortho').real
-        
-        return out
 
 
 class FNO1DBlock(nn.Module):

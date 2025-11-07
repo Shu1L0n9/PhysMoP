@@ -160,8 +160,14 @@ class Trainer(BaseTrainer):
             warmup_factor = min(1.0, epoch / max(1, config.loss_weights.physics_warmup_epochs))
             lambda_physics = config.loss_weights.lambda_physics * warmup_factor
             
-            # Get motion features (simplified - use mean of history as context)
-            motion_feats_all = gt_q[:, :config.hist_length, :].mean(dim=1)  # (B, 63)
+            # Get motion features: expand history to match expected feature dimension
+            # NOTE: This is a simplified approach. The full implementation would use
+            # the encoded context from the FNO operator's ContextEncoder.
+            # Here we use the mean of the history as a basic context representation,
+            # then expand it to match the expected dimension (dim*4) through repetition.
+            motion_feats_base = gt_q[:, :config.hist_length, :].mean(dim=1)  # (B, 63)
+            # Expand to expected feature dimension for physics regularizer (dim * 4 = 252)
+            motion_feats_all = motion_feats_base.repeat(1, 4)  # (B, 252)
             
             # Compute physics residual on predicted trajectory
             q_pred_only = pred_q_data[:, config.hist_length:, :]  # Future predictions only
