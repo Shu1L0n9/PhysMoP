@@ -23,6 +23,10 @@ import constants
 class Trainer(BaseTrainer):
     
     def init_fn(self):
+        # Set model kind based on command line option
+        if hasattr(self.options, 'use_fno') and self.options.use_fno:
+            config.model_kind = 'fno_operator'
+        
         self.train_ds = MixedDataset(hist_length=config.hist_length, dataset_name='AMASS')
         
         self.model = PhysMoP(hist_length=config.hist_length,
@@ -97,6 +101,11 @@ class Trainer(BaseTrainer):
         gt_shape = input_batch['shape'].type(torch.float32).view(self.process_size, 10)
         # NxTx1 to N*Tx1
         gt_gender_id = input_batch['gender_id'].type(torch.float32).view(self.process_size)
+        
+        # Query times (for FNO mode)
+        query_times = None
+        if 'query_times' in input_batch:
+            query_times = input_batch['query_times'].type(torch.float32).to(self.device)
 
         # 3D information
         gt_q[:,:,:3] = gt_q[:,:,:3] - gt_q[:,0:1,:3]
@@ -111,7 +120,7 @@ class Trainer(BaseTrainer):
 
         gt_vertices_norm, gt_M_inv, gt_JcT = None, None, None
 
-        model_output = self.model.forward_dynamics(gt_vertices_norm, gt_q, gt_q_ddot, gt_M_inv, gt_JcT, self.device)
+        model_output = self.model.forward_dynamics(gt_vertices_norm, gt_q, gt_q_ddot, gt_M_inv, gt_JcT, self.device, query_times=query_times)
         pred_q_data, pred_q_physics_gt, pred_q_physics_pred, pred_q_fusion, pred_q_ddot_data, pred_q_ddot_physics_gt, weight_t = model_output 
 
         # data-driven
@@ -142,6 +151,29 @@ class Trainer(BaseTrainer):
         loss_pose_fusion = self.criterion_mae(pred_pose_fusion, gt_pose).mean()
 
         loss_fusion_weight_reg = (weight_t).abs().mean()
+        
+        # Physics regularizer loss (for FNO mode)
+        loss_physics = torch.tensor(0.0).to(self.device)
+        if config.model_kind == 'fno_operator' and config.physics_config.enabled and self.model.physics_regularizer is not None:
+            # Compute physics loss with warmup
+            epoch = self.step_count // (len(self.train_ds) // self.options.batch_size)
+            warmup_factor = min(1.0, epoch / max(1, config.loss_weights.physics_warmup_epochs))
+            lambda_physics = config.loss_weights.lambda_physics * warmup_factor
+            
+            # Get motion features (simplified - use mean of history as context)
+            motion_feats_all = gt_q[:, :config.hist_length, :].mean(dim=1)  # (B, 63)
+            
+            # Compute physics residual on predicted trajectory
+            q_pred_only = pred_q_data[:, config.hist_length:, :]  # Future predictions only
+            if query_times is not None:
+                query_future = query_times[:, config.hist_length:]
+            else:
+                query_future = torch.arange(config.hist_length, config.total_length, dtype=torch.float32, device=self.device).unsqueeze(0).expand(self.options.batch_size, -1)
+            
+            loss_physics_raw, _ = self.model.physics_regularizer(
+                q_pred_only, query_future, motion_feats_all, constants.dt
+            )
+            loss_physics = lambda_physics * loss_physics_raw
 
         loss = 5000 * (self.options.keypoint_loss_weight_data * loss_keypoints_data +\
                self.options.pose_loss_weight_data * loss_pose_data +\
@@ -149,7 +181,7 @@ class Trainer(BaseTrainer):
                self.options.pose_loss_weight_physics_gt * loss_pose_physics_gt +\
                self.options.keypoint_loss_weight_fusion * loss_keypoints_fusion +\
                self.options.pose_loss_weight_fusion * loss_pose_fusion +\
-               self.options.fusion_weight_reg_loss_weight * loss_fusion_weight_reg)
+               self.options.fusion_weight_reg_loss_weight * loss_fusion_weight_reg) + loss_physics
 
         # Do backprop
         self.optimizer.zero_grad()
@@ -175,6 +207,7 @@ class Trainer(BaseTrainer):
                   'loss_keypoints_fusion': self.options.keypoint_loss_weight_fusion * loss_keypoints_fusion.detach().item(),
                   'loss_pose_fusion': self.options.pose_loss_weight_fusion * loss_pose_fusion.detach().item(),
                   'fusion_weight': self.options.fusion_weight_reg_loss_weight * loss_fusion_weight_reg.detach().item(),
+                  'loss_physics': loss_physics.detach().item() if config.model_kind == 'fno_operator' else 0.0,
                   'lr':  lr_current,}
 
         return output, losses

@@ -82,6 +82,9 @@ class evaluator(nn.Module):
             gt_shape = data_test[:, :, 63:63+10].reshape(process_size_test, 10)
             # NxTx1 to N*Tx1
             gt_gender_id = data_test[:, :, 63+10:63+10+1].reshape(process_size_test)
+            
+            # Query times
+            query_times = None
         else:
             # NxTx63 to N*Tx3
             gt_q = data_test['q'].type(torch.float32)
@@ -92,6 +95,11 @@ class evaluator(nn.Module):
             gt_shape = data_test['shape'].type(torch.float32).view(process_size_test, 10)
             # NxTx1 to N*Tx1
             gt_gender_id = data_test['gender_id'].type(torch.float32).view(process_size_test)
+            
+            # Query times (for FNO mode)
+            query_times = None
+            if 'query_times' in data_test:
+                query_times = data_test['query_times'].type(torch.float32).to(self.device)
 
         # 3D information
         gt_q[:,:,:3] = gt_q[:,:,:3] - gt_q[:,0:1,:3]
@@ -106,7 +114,7 @@ class evaluator(nn.Module):
         gt_vertices, gt_joints, gt_joints_smpl, gt_rotMat_individual = self.forward_kinematics(gt_pose, gt_shape, gt_gender_id, process_size_test, joints_smpl=True, vertices=True)
         gt_vertices_norm, gt_M_inv, gt_JcT = None, None, None
 
-        model_output = self.model.forward_dynamics(gt_vertices_norm, gt_q, gt_q_ddot, gt_M_inv, gt_JcT, self.device, mode='test')
+        model_output = self.model.forward_dynamics(gt_vertices_norm, gt_q, gt_q_ddot, gt_M_inv, gt_JcT, self.device, mode='test', query_times=query_times)
         pred_q_data, pred_q_physics_gt, pred_q_physics_pred, pred_q_fusion, pred_q_ddot_data, pred_q_ddot_physics_gt, fusion_weight = model_output
 
         # data-driven
