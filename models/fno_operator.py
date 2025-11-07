@@ -71,11 +71,17 @@ class SpectralConv1d(nn.Module):
         # Convert complex to real representation [real, imag]
         x_ft_real = torch.stack([x_ft.real, x_ft.imag], dim=-1)
         
-        # Truncate to the first 'modes' frequencies
-        x_ft_low = x_ft_real[..., :self.modes, :]  # (B, in_c, modes, 2)
+        # Determine actual number of modes to use (minimum of specified modes and available frequencies)
+        actual_modes = min(self.modes, x_ft_real.shape[2])
+        
+        # Truncate to the first 'actual_modes' frequencies
+        x_ft_low = x_ft_real[..., :actual_modes, :]  # (B, in_c, actual_modes, 2)
+        
+        # Use only the corresponding weights
+        weights_low = self.weights[..., :actual_modes, :]  # (in_c, out_c, actual_modes, 2)
         
         # Apply spectral weights
-        out_ft_low = self.complex_mul1d(x_ft_low, self.weights)  # (B, out_c, modes, 2)
+        out_ft_low = self.complex_mul1d(x_ft_low, weights_low)  # (B, out_c, actual_modes, 2)
         
         # Reconstruct full frequency spectrum (pad higher frequencies with zeros)
         if self.use_real_fft:
@@ -85,9 +91,18 @@ class SpectralConv1d(nn.Module):
             
         out_ft = torch.zeros(batch_size, self.out_channels, num_freqs, 2, 
                             dtype=x.dtype, device=x.device)
-        out_ft[..., :self.modes, :] = out_ft_low
+        out_ft[..., :actual_modes, :] = out_ft_low
         
         # Convert back to complex
+        out_ft_complex = torch.complex(out_ft[..., 0], out_ft[..., 1])
+        
+        # Apply inverse FFT
+        if self.use_real_fft:
+            out = torch.fft.irfft(out_ft_complex, n=time_steps, dim=-1, norm='ortho')
+        else:
+            out = torch.fft.ifft(out_ft_complex, dim=-1, norm='ortho').real
+        
+        return out
         out_ft_complex = torch.complex(out_ft[..., 0], out_ft[..., 1])
         
         # Apply inverse FFT

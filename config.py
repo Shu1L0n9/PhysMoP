@@ -46,9 +46,9 @@ model_kind = 'rollout'  # Default to original rollout mode
 
 # FNO-specific parameters (used when model_kind == 'fno_operator')
 fno_config = edict()
-fno_config.d_model = 128           # Hidden dimension for FNO layers
-fno_config.num_layers = 4          # Number of FNO spectral convolution layers
-fno_config.modes = 16              # Number of Fourier modes to keep
+fno_config.d_model = 96            # Hidden dimension for FNO layers (reduced for ±25% constraint)
+fno_config.num_layers = 3          # Number of FNO spectral convolution layers (reduced)
+fno_config.modes = 12              # Number of Fourier modes to keep (reduced)
 fno_config.time_embed = 'fourier'  # Time positional encoding type
 fno_config.time_embed_dim = 4      # Dimension for time embedding
 fno_config.use_real_fft = True     # Use real FFT for efficiency
