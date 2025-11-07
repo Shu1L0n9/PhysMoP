@@ -35,6 +35,7 @@ class TrainOptions():
         io.add_argument('--data', default=False, help='Train the data-driven model')
         io.add_argument('--fix_weight', default=False, help='Fix the weights of the data-driven and physics-based model')
         io.add_argument('--fusion', default=False, help='Train the fusion model')
+        io.add_argument('--use_fno', action='store_true', help='Use FNO operator mode instead of rollout')
 
         train = self.parser.add_argument_group('Training Options')
         train.add_argument('--num_epochs', type=int, default=5, help='Total number of training epochs')

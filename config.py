@@ -40,5 +40,37 @@ SMPLH_F_PATH = './dataset/smpl_official/female/model.npz'
 
 test_mode = 'AMASS' # 'H36M' 
 
+# FNO Operator Configuration
+# Model type: 'rollout' (original) or 'fno_operator' (new FNO-based)
+model_kind = 'rollout'  # Default to original rollout mode
+
+# FNO-specific parameters (used when model_kind == 'fno_operator')
+fno_config = edict()
+fno_config.d_model = 96            # Hidden dimension for FNO layers (reduced for ±25% constraint)
+fno_config.num_layers = 3          # Number of FNO spectral convolution layers (reduced)
+fno_config.modes = 12              # Number of Fourier modes to keep (reduced)
+fno_config.time_embed = 'fourier'  # Time positional encoding type
+fno_config.time_embed_dim = 4      # Dimension for time embedding
+fno_config.use_real_fft = True     # Use real FFT for efficiency
+fno_config.normalize = True        # Normalize inputs/outputs
+fno_config.padding_mode = 'reflect' # Padding for FFT
+fno_config.dealias = True          # Apply dealiasing
+
+# Physics regularizer parameters (for FNO mode)
+physics_config = edict()
+physics_config.enabled = True      # Enable physics consistency regularizer
+physics_config.use_cholesky = True # Use Cholesky decomposition for M
+physics_config.epsilon = 1e-6      # Numerical stability constant
+physics_config.approx_derivatives = False  # Use stop-grad for derivatives
+
+# Loss weights (for FNO mode)
+loss_weights = edict()
+loss_weights.lambda_data = 1.0     # Weight for data loss
+loss_weights.lambda_physics = 0.1  # Weight for physics residual loss
+loss_weights.lambda_smooth = 0.01  # Weight for smoothness loss
+loss_weights.physics_warmup_epochs = 2  # Epochs for physics loss warmup
+
+# Query sampling strategy
+query_sampling = 'uniform'  # 'uniform' or 'random'
 
 
